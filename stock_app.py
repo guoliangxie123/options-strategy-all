@@ -125,14 +125,14 @@ def main():
 
         st.markdown("### 💰 账户水位监控")
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("💵 净资产", f"${net:,.0f}")
-        c2.metric("🛡️ 剩余购买力", f"${bp:,.0f}")
+        c1.metric("💵 净资产", f"${net:,.2f}")
+        c2.metric("🛡️ 剩余购买力", f"${bp:,.2f}")
 
         # 杠杆和保证金着色预警
         margin_color = "normal" if margin_usage < 60 else "inverse"
-        c3.metric("⚠️ 保证金使用率", f"{margin_usage:.1f}%", delta="爆仓风险较高" if margin_usage > 80 else "安全",
+        c3.metric("⚠️ 保证金使用率", f"{margin_usage:.2f}%", delta="爆仓风险较高" if margin_usage > 80 else "安全",
                   delta_color=margin_color)
-        c4.metric("🏗️ 总名义价值暴露", f"${total_notional:,.0f}")
+        c4.metric("🏗️ 总名义价值暴露", f"${total_notional:,.2f}")
         c5.metric("⚖️ 裸卖杠杆倍数", f"{leverage:.2f}x", delta="杠杆极高" if leverage > 2 else "稳健",
                   delta_color="inverse" if leverage > 2 else "normal")
 
@@ -180,16 +180,16 @@ def main():
             "标的现价": f"${cur_p:.2f}",
             "行权价": f"${p['strike_price']:.2f}",
             "安全垫 (%)": round(buffer_pct, 2),
-            "浮盈 (%)": round(profit_pct, 1),
-            "成本价": f"${p['cost']:.3f}",
-            "最新期权价": f"${opt_cur_p:.3f}",
+            "浮盈 (%)": round(profit_pct, 2),
+            "成本价": f"${p['cost']:.2f}",
+            "最新期权价": f"${opt_cur_p:.2f}",
             "剩余天数 (DTE)": p['dte'],
             "标记": target_tag
         })
 
         feishu_body += (f"{status_emoji} | {p['underlying']} {target_tag}\n"
-                        f" ├ 现价: {cur_p:.2f} | 行权: {p['strike_price']:.2f} | 安全垫: {buffer_pct:.1f}%\n"
-                        f" └ 盈亏: {profit_pct:.1f}% ( 现价:{opt_cur_p:.3f}/成本:{p['cost']:.3f}) | DTE: {p['dte']} 天\n\n")
+                        f" ├ 现价: {cur_p:.2f} | 行权: {p['strike_price']:.2f} | 安全垫: {buffer_pct:.2f}%\n"
+                        f" └ 盈亏: {profit_pct:.2f}% ( 现价:{opt_cur_p:.2f}/成本:{p['cost']:.2f}) | DTE: {p['dte']} 天\n\n")
 
     # 渲染数据表格（带颜色高亮）
     df = pd.DataFrame(display_data).sort_values(by=["浮盈 (%)", "安全垫 (%)"])
@@ -206,8 +206,8 @@ def main():
     if st.sidebar.button("📨 推送当前报告至飞书", use_container_width=True):
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         header = (f"📊 Sell Put 风险看板\n⏰ 时间: {now_str}\n"
-                  f"💰 净资产: ${net:,.0f} | 🛡️ 购买力: ${bp:,.0f}\n"
-                  f"⚠️ 保证金: {margin_usage:.1f}% | ⚖️ 杠杆: {leverage:.2f}x\n"
+                  f"💰 净资产: ${net:,.2f} | 🛡️ 购买力: ${bp:,.2f}\n"
+                  f"⚠️ 保证金: {margin_usage:.2f}% | ⚖️ 杠杆: {leverage:.2f}x\n"
                   f"--------------------------\n")
         send_to_feishu(header + feishu_body)
 
