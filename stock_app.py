@@ -75,10 +75,14 @@ def get_my_sell_puts():
                 else:
                     underlying, expiry_str, strike_price, dte, notional = "UNKNOWN", "N/A", 0.0, 0, 0.0
 
+                # 计算已收权利金 ( 成本价 * 数量 * 期权乘数 )
+                premium_received = abs(float(pos.cost_price)) * abs(int(pos.quantity)) * 100
+
                 sell_puts.append({
                     "symbol": pos.symbol, "underlying": underlying, "strike_price": strike_price,
                     "expiry_date": expiry_str, "dte": dte, "qty": abs(int(pos.quantity)),
-                    "cost": abs(float(pos.cost_price)), "notional": notional
+                    "cost": abs(float(pos.cost_price)), "notional": notional,
+                    "premium": premium_received # <-- 新增字段
                 })
     return sell_puts, total_notional
 
@@ -142,74 +146,102 @@ def main():
     st.markdown("### 📊 Sell Put 持仓阵列")
     if not my_puts:
         st.info("当前账户没有任何 Sell Put 持仓。享受空仓的宁静吧！☕")
-        return
+    else:
+        underlyings = [p['underlying'] for p in my_puts]
+        opt_symbols = [p['symbol'] for p in my_puts]
 
-    underlyings = [p['underlying'] for p in my_puts]
-    opt_symbols = [p['symbol'] for p in my_puts]
+        price_map = get_quotes(underlyings, is_option=False)
+        opt_price_map = get_quotes(opt_symbols, is_option=True)
 
-    price_map = get_quotes(underlyings, is_option=False)
-    opt_price_map = get_quotes(opt_symbols, is_option=True)
+        display_data = []
+        feishu_body = ""
 
-    display_data = []
-    feishu_body = ""
+        for p in my_puts:
+            cur_p = price_map.get(p['underlying'], 0.0)
+            opt_cur_p = opt_price_map.get(p['symbol'], 0.0)
 
-    for p in my_puts:
-        cur_p = price_map.get(p['underlying'], 0.0)
-        opt_cur_p = opt_price_map.get(p['symbol'], 0.0)
+            buffer_pct = ((cur_p - p['strike_price']) / cur_p * 100) if cur_p > 0 else 0.0
+            profit_pct = ((p['cost'] - opt_cur_p) / p['cost'] * 100) if p['cost'] > 0 else 0.0
 
-        buffer_pct = ((cur_p - p['strike_price']) / cur_p * 100) if cur_p > 0 else 0.0
-        profit_pct = ((p['cost'] - opt_cur_p) / p['cost'] * 100) if p['cost'] > 0 else 0.0
+            # 判断状态
+            if buffer_pct < 5 or p['dte'] < 7:
+                status = "🔴 危险 ( 高危/末日 )"
+                status_emoji = "🔴"
+            elif buffer_pct < 12:
+                status = "🟡 关注 ( 跌破警戒 )"
+                status_emoji = "🟡"
+            else:
+                status = "🟢 安全"
+                status_emoji = "🟢"
 
-        # 判断状态
-        if buffer_pct < 5 or p['dte'] < 7:
-            status = "🔴 危险 ( 高危/末日 )"
-            status_emoji = "🔴"
-        elif buffer_pct < 12:
-            status = "🟡 关注 ( 跌破警戒 )"
-            status_emoji = "🟡"
-        else:
-            status = "🟢 安全"
-            status_emoji = "🟢"
+            target_tag = "🔥 已达标" if profit_pct >= 50 else ""
 
-        target_tag = "🔥 已达标" if profit_pct >= 50 else ""
+            display_data.append({
+                "状态": status,
+                "标的": p['underlying'],
+                "数量": p['qty'],
+                "标的现价": f"${cur_p:.2f}",
+                "行权价": f"${p['strike_price']:.2f}",
+                "安全垫 (%)": round(buffer_pct, 2),
+                "浮盈 (%)": round(profit_pct, 2),
+                "成本价": f"${p['cost']:.2f}",
+                "最新期权价": f"${opt_cur_p:.2f}",
+                "剩余天数 (DTE)": p['dte'],
+                "标记": target_tag
+            })
 
-        display_data.append({
-            "状态": status,
-            "标的": p['underlying'],
-            "数量": p['qty'],
-            "标的现价": f"${cur_p:.2f}",
-            "行权价": f"${p['strike_price']:.2f}",
-            "安全垫 (%)": round(buffer_pct, 2),
-            "浮盈 (%)": round(profit_pct, 2),
-            "成本价": f"${p['cost']:.2f}",
-            "最新期权价": f"${opt_cur_p:.2f}",
-            "剩余天数 (DTE)": p['dte'],
-            "标记": target_tag
-        })
+            feishu_body += (f"{status_emoji} | {p['underlying']} {target_tag}\n"
+                            f" ├ 现价: {cur_p:.2f} | 行权: {p['strike_price']:.2f} | 安全垫: {buffer_pct:.2f}%\n"
+                            f" └ 盈亏: {profit_pct:.2f}% ( 现价:{opt_cur_p:.2f}/成本:{p['cost']:.2f}) | DTE: {p['dte']} 天\n\n")
 
-        feishu_body += (f"{status_emoji} | {p['underlying']} {target_tag}\n"
-                        f" ├ 现价: {cur_p:.2f} | 行权: {p['strike_price']:.2f} | 安全垫: {buffer_pct:.2f}%\n"
-                        f" └ 盈亏: {profit_pct:.2f}% ( 现价:{opt_cur_p:.2f}/成本:{p['cost']:.2f}) | DTE: {p['dte']} 天\n\n")
+        # 渲染数据表格（带颜色高亮）
+        df = pd.DataFrame(display_data).sort_values(by=["浮盈 (%)", "安全垫 (%)"])
 
-    # 渲染数据表格（带颜色高亮）
-    df = pd.DataFrame(display_data).sort_values(by=["浮盈 (%)", "安全垫 (%)"])
+        def highlight_risk(row):
+            if "危险" in row['状态']: return ['background-color: #ffcccc'] * len(row)
+            if "关注" in row['状态']: return ['background-color: #fff4cc'] * len(row)
+            if "已达标" in row['标记']: return ['background-color: #ccffcc'] * len(row)
+            return [''] * len(row)
 
-    def highlight_risk(row):
-        if "危险" in row['状态']: return ['background-color: #ffcccc'] * len(row)
-        if "关注" in row['状态']: return ['background-color: #fff4cc'] * len(row)
-        if "已达标" in row['标记']: return ['background-color: #ccffcc'] * len(row)
-        return [''] * len(row)
+        st.dataframe(df.style.apply(highlight_risk, axis=1), use_container_width=True, hide_index=True)
 
-    st.dataframe(df.style.apply(highlight_risk, axis=1), use_container_width=True, hide_index=True)
+    st.divider()
 
-    # ---- 第三部分：飞书推送功能 ----
+    # ---- 第三部分：新增的按到期日权利金统计 ----
+    st.markdown("### 🗓️ 已收权利金汇总 ( 按到期日 )")
+    if my_puts:
+        premium_data = [{"到期日": p["expiry_date"], "已收权利金 (USD)": p["premium"]} for p in my_puts]
+        df_premium = pd.DataFrame(premium_data)
+        
+        # 按照到期日进行 Groupby 分组求和
+        premium_summary = df_premium.groupby("到期日")["已收权利金 (USD)"].sum().reset_index()
+        premium_summary = premium_summary.sort_values(by="到期日")
+        
+        # 计算持仓总权利金
+        total_premium_received = premium_summary["已收权利金 (USD)"].sum()
+        st.metric("💵 未平仓部分总计已收权利金", f"${total_premium_received:,.2f}")
+
+        col_p1, col_p2 = st.columns([1, 2])
+        with col_p1:
+            st.dataframe(premium_summary.style.format({"已收权利金 (USD)": "${:,.2f}"}), use_container_width=True, hide_index=True)
+        with col_p2:
+            st.bar_chart(premium_summary.set_index("到期日")["已收权利金 (USD)"])
+    else:
+        st.info("当前没有持仓权利金数据可供统计。")
+
+    st.divider()
+
+    # ---- 第四部分：飞书推送功能 ----
     if st.sidebar.button("📨 推送当前报告至飞书", use_container_width=True):
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        header = (f"📊 Sell Put 风险看板\n⏰ 时间: {now_str}\n"
-                  f"💰 净资产: ${net:,.2f} | 🛡️ 购买力: ${bp:,.2f}\n"
-                  f"⚠️ 保证金: {margin_usage:.2f}% | ⚖️ 杠杆: {leverage:.2f}x\n"
-                  f"--------------------------\n")
-        send_to_feishu(header + feishu_body)
+        if my_puts:
+            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            header = (f"📊 Sell Put 风险看板\n⏰ 时间: {now_str}\n"
+                      f"💰 净资产: ${net:,.2f} | 🛡️ 购买力: ${bp:,.2f}\n"
+                      f"⚠️ 保证金: {margin_usage:.2f}% | ⚖️ 杠杆: {leverage:.2f}x\n"
+                      f"--------------------------\n")
+            send_to_feishu(header + feishu_body)
+        else:
+            st.sidebar.warning("当前没有持仓，无需推送！")
 
 
 if __name__ == "__main__":
